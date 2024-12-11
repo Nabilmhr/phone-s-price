@@ -1,0 +1,215 @@
+---
+title: "Projet Data mining apprentissage"
+output: html_document
+date: "2024-03-26"
+---
+
+Le prix des téléphones portables dépend de plusieurs facteurs comme la marque, la taille, le poids, la qualité de l'image, la RAM, la batterie ou encore le processeur.
+
+Product_id : ID of each cellphone.
+Price : Price of each cellphone.
+Sale : Sales number.
+weight : Weight of each cellphone.
+resoloution :  Resoloution of each cellphone.
+ppi : Phone Pixel Density.
+cpu core : Type of CPU core in each cellphone.
+cpu freq : CPU Frequency in each cellphone.
+internal mem : Internal memory of each cellphone.
+ram : RAM of each cellphone.
+
+Le but de ce projet est de prédire/estimer le prix d'un téléphone à partir de ses caractéristiques.
+
+
+#Chargement des données
+```{r setup, include=FALSE}
+getwd()
+donnee <- read.csv("Cellphone.csv")
+```
+
+#Chargement des packages
+```{r}
+library(knitr) 
+library(tidyverse)
+library(corrplot) 
+library(scales) 
+library(rpart) 
+library(glmnet) 
+library("ISLR") 
+library(tidyverse) 
+library(caret)
+library(leaps) 
+library(car) 
+library(randomForest)
+```
+
+#Visualisation des données
+```{r}
+dim(donnee)
+
+head(donnee)
+
+str(donnee)
+
+```
+Les base de données est composée de 161 observations et de 14 variables.
+Toutes les variables sont quantitatives.
+
+
+```{r}
+summary(donnee)
+```
+Le prix moyen d'un téléphone est de 2216 € ?
+On constate aucunes données manquantes dans notre base de données.
+
+#Corrélation
+```{r}
+correlation <- cor(donnee)
+corrplot(correlation, method = 'number',type = 'lower')
+```
+Les variables les plus corrélées positivement sont Resolution et Weight (la résolution et le poids du téléphone) avec un coefficient de corrélation de 0,89.
+
+Les variables les plus corrélées négativement sont Thickness et cpu.core (l'épaisseur et le type de processeur du téléphone) avec un coefficient de corrélation de -0,70.
+
+Dans un modèle de régression, deux variables très corrélées entre elles peuvent fausser l’estimation des coefficients. Il est donc utile de tenir compte des relations ci-dessus.
+
+La variable la plus corrélée positivement à Price est ram (mémoire nécessaire au bon fonctionnement du processeur) avec un coefficient de corrélation de 0,90. Donc la capacité de la RAM est un élément important dans dans l'estimation du prix d'un téléphone.
+
+La variable la plus corrélée négativement à Price est Thickness (l'épaisseur du téléphone) avec un coefficient de corrélation de -0,72.
+Donc plus le téléphone est épais, moins il est cher et inversement.
+
+
+#Création d'un échantillon d'apprentissage et de test
+
+Le but de partitionner les données en base d'apprentissage et de test est de pouvoir évaluer les performances de nos modèles d'apprentissage automatique.
+
+L'évaluation des performances sur un ensemble de test distinct est importante pour éviter le sur-ajustement, cas dans lequel le modèle apprend les caractéristiques spécifiques de l'ensemble de données d'apprentissage sans pouvoir généraliser sur de nouvelles données.
+
+Nous avons créé un ensemble d'apprentissage avec 75% des données (donneetrain) et un ensemble de tests avec les 25% restants (donneetest).
+
+Nous utiliserons principalement le risque quadratique moyen (MSE) et la racine du risque quadratique moyen (RMSE) sur l’échantillon test, comme mesure de l’erreur de prédiction.
+
+```{r}
+set.seed(100)
+indxTrain = createDataPartition(donnee$Price,p=0.75,list=FALSE)
+donneetrain= donnee[indxTrain,]
+donneetest = donnee[-indxTrain,]
+```
+
+
+#Modèle de régression linéaire complet
+```{r}
+reg = lm(Price~., data=donneetrain)
+summary(reg)
+```
+La variable dépendante est Price.
+Les variables indépendantes sont les 13 autres variables de notre base de données.
+
+Le R^2 ajusté est de 94,93 % ce qui correspond effectivement a un bon ajustement.
+
+Cependant, le graphique ci-dessous montre que le modèle peut être amélioré.
+```{r}
+res=residuals(reg)
+plot(reg,which=1:2)
+```
+À noter que ce modèle nous servira de première référence pour évaluer la performance des prochains modèles.
+
+#Modèle AIC
+```{r}
+regAIC= step(reg, trace=TRUE)
+extractAIC(regAIC)
+```
+
+Le modèle avec le plus petit AIC est considéré comme le meilleur modèle parmi les modèles candidats. Cela signifie que ce modèle représente un bon compromis entre la qualité de l'ajustement et la complexité du modèle.
+
+Dans notres cas, le plus petit AIC est de 1269,49 et il correspond au modèle suivant (dernier modèle).
+
+
+```{r}
+modAIC = lm(Price ~ weight + ppi + cpu.core + cpu.freq + internal.mem + ram + 
+    battery + thickness, data=donneetrain)
+
+summary(modAIC)
+extractAIC(modAIC)
+
+```
+
+Le modèle AIC a un R^2 ajusté de 94,99%. Ce modèle est donc légèrement mieux ajusté que le modèle complet.
+
+
+#Modèle Cp de Mallows
+```{r}
+#Extraction des variables explicatives
+donneetrain.x = donneetrain[,-2]
+
+#Recherche des meilleurs modèles au sens du Cp
+p.choix = leaps(donneetrain.x,donneetrain[,"Price"],method="Cp",nbest=1)
+
+#Résultats
+p.choix$Cp
+plot(p.choix$size-1,p.choix$Cp)
+
+#Meilleur modèle
+t = (p.choix$Cp==min(p.choix$Cp))
+
+#Liste des variables explicatives du meilleur modèle
+colnames(donneetrain)[p.choix$which[t]]
+```
+
+```{r}
+#Modèle sélectionné selon le Cp de Mallows
+modCp = lm(Price ~ Sale + resoloution + ppi + cpu.core + cpu.freq + internal.mem + Front_Cam + battery, data=donneetrain)
+
+summary(modCp)
+```
+Le modèle obtenu au sens du Cp de Mallows explique 94,05% de la variabilité du prix des téléphones.
+
+
+
+#Modèle au sens du R2 ajusté
+```{r}
+p.choix2 = leaps(donneetrain.x,donneetrain[,"Price"],method="adjr2",nbest=1)
+
+plot(p.choix2$size-1,p.choix2$adjr2)
+
+#Meilleur modèle
+t = (p.choix2$adjr2==max(p.choix2$adjr2))
+
+#Liste des variables explicatives du meilleur modèle
+colnames(donneetrain)[p.choix2$which[t]]
+
+```
+
+```{r}
+#Modèle sélectionné selon le R2 ajusté
+modAdjR2 = lm(Price ~ Sale + resoloution + ppi + cpu.core + cpu.freq + internal.mem + RearCam + Front_Cam + battery, data=donneetrain)
+
+summary(modAdjR2)
+```
+Tout comme le AIC et le Cp de Mallow’s, le 𝑅2 ajusté est un critère permettant d’évaluer la qualité d’ajustement d’un modèle. Tout en tenant compte du nombre de prédicteurs, il mesure la proportion de variance expliquée par les variables indépendantes, dans la variance totale de la variable dépendante.
+
+En considérant ce critère, le 𝑅2 ajusté du modèle sélectionné est de 93,83% et son risque quadratique moyen est de 441364613.
+
+En termes d’ajustement, le modèle est très similaire aux modèles précédents. En revanche, il est le moins performant de tous les modèles en termes de prédiction.
+
+#Erreurs empiriques
+```{r}
+#modèle complet
+pred = predict(reg, newdata= donneetest) 
+err= mean((pred-donneetest$Price)^2)
+
+#modèle AIC
+predAIC = predict(modAIC, newdata= donneetest) 
+errAIC= mean((predAIC-donneetest$Price)^2)
+
+#modèle Cp Mallows
+predCP = predict(modCp, newdata= donneetest) 
+errCP= mean((predCP-donneetest$Price)^2)
+
+#modèle R2 ajusté
+predAdjR2 = predict(modAdjR2, newdata= donneetest) 
+errAdjr2= mean((predAdjR2-donneetest$Price)^2)
+```
+
+Si on regarde les erreurs de prédictions sur l'échantillon test pour chaque modèle, on constate que le modèle complet a l'erreur la plus faible de 36302.
+
+Au vu des résultats précédents, le modèle AIC est celui avec le meilleur R2 ajusté.
